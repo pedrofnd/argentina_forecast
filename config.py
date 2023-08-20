@@ -121,18 +121,18 @@ def test_stationarity_dickey_fuller(data,serie):
     else:
         print(f'A série {serie} não é estacionária. ')
 
-def find_best_sarima_params(train_data, validation_data, s=12):
+
+def find_best_sarima_params(train_data, validation_data, nome_arima_df, s=12, top_n=5):
     # Definir a grade de parametrizações
     p_values = range(0, 3)  # Ordem do termo autorregressivo
     d_values = range(0, 2)  # Ordem de diferenciação
     q_values = range(0, 3)  # Ordem do termo de média móvel
-    P_values = range(0, 3)  # Ordem do termo autorregressivo sazonal
-    D_values = range(0, 2)  # Ordem de diferenciação sazonal
-    Q_values = range(0, 3)  # Ordem do termo de média móvel sazonal
+    P_values = range(0, 2)  # Ordem do termo autorregressivo sazonal
+    D_values = range(0, 3)  # Ordem de diferenciação sazonal
+    Q_values = range(0, 2)  # Ordem do termo de média móvel sazonal
     # Criar todas as combinações possíveis de parâmetros
     param_combinations = list(product(p_values, d_values, q_values, P_values, D_values, Q_values))
-    best_mse = float('inf')
-    best_params = None
+    best_combinations = []
     # Iterar sobre as combinações de parâmetros
     for params in param_combinations:
         p, d, q, P, D, Q = params
@@ -141,24 +141,26 @@ def find_best_sarima_params(train_data, validation_data, s=12):
             model = SARIMAX(train_data, order=(p, d, q), seasonal_order=(P, D, Q, s))
             model_fit = model.fit(disp=False)
             # Fazer previsões nos dados de validação
-            predictions = model_fit.predict(start=len(train_data), end=len(train_data) + len(test_data) - 1)
+            predictions = model_fit.predict(start=len(train_data), end=len(train_data) + len(validation_data) - 1)
             # Calcular o erro quadrático médio
             mse = mean_squared_error(validation_data, predictions)
-            # Atualizar os melhores parâmetros se necessário
-            if mse < best_mse:
-                best_mse = mse
-                best_params = params
+            # Atualizar as melhores combinações se necessário
+            if len(best_combinations) < top_n or mse < best_combinations[-1][1]:
+                best_combinations.append((params, mse))
+                best_combinations = sorted(best_combinations, key=lambda x: x[1])[:top_n]
         except:
             continue
-    return best_params
+    # Extrair os valores de parâmetros e MSE para criar um DataFrame
+    param_data = [(params, mse) for params, mse in best_combinations]
+    df = pd.DataFrame(param_data, columns=['Parametros', 'MSE'])
+    df.to_csv(f"{nome_arima_df}", sep=';', header=True, index=False)
+    return df
 
 def mean_absolute_percentage_error(y_true, y_pred):
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
-
 def plot_residual_analysis(test_values, predicted_values, residuals):
     plt.figure(figsize=(12, 10))
-
     # Plotar os dados reais de teste
     plt.subplot(3, 1, 1)
     plt.plot(test_values.index, test_values, label='Dados de Teste', color='blue')
@@ -167,7 +169,6 @@ def plot_residual_analysis(test_values, predicted_values, residuals):
     plt.ylabel('Energia (mwmed)')
     plt.title('Comparação entre Dados de Teste e Previsões do Modelo SARIMA')
     plt.legend()
-
     # Plotar a diferença entre os dados reais e as previsões (resíduos)
     plt.subplot(3, 1, 2)
     plt.plot(residuals.index, residuals, label='Diferença (Resíduos)', color='green')
@@ -176,14 +177,12 @@ def plot_residual_analysis(test_values, predicted_values, residuals):
     plt.ylabel('Energia (mwmed)')
     plt.title('Resíduos do Modelo SARIMA')
     plt.legend()
-
     # Histograma dos resíduos
     plt.subplot(3, 1, 3)
     plt.hist(residuals, bins=20, color='blue', alpha=0.7)
     plt.title("Histograma dos Resíduos")
     plt.xlabel("Valor dos Resíduos")
     plt.ylabel("Frequência")
-
     # Ajustar o layout para evitar sobreposição
     plt.tight_layout()
     plt.show()
@@ -195,25 +194,33 @@ def test_residuals(residuals):
     min_p_value_idx = lb_test['lb_pvalue'].idxmin()
     min_p_value = lb_test['lb_pvalue'].min()
     if all(p > 0.01 for p in p_values_ljung_box):
-        print("Não há evidência de autocorrelação serial nos resíduos. LAG",min_p_value_idx,'valor',min_p_value)
+        autocorrelation_result = (f"Nao ha evidencia de autocorrelacao serial nos residuos. LAG {min_p_value_idx}, valor, {min_p_value}")
+        print(autocorrelation_result)
     else:
-        print("Há evidência de autocorrelação serial nos resíduos. LAG",min_p_value_idx,'valor',min_p_value)
+        autocorrelation_result = (f"Ha evidencia de autocorrelacao serial nos residuos. LAG, {min_p_value_idx},'valor',{min_p_value}")
+        print(autocorrelation_result)
 
     # Teste de Kolmogorov-Smirnov para normalidade dos resíduos
     ks_statistic, ks_p_value = kstest(residuals, 'norm')
     alpha = 0.05  # Nível de significância
     if ks_p_value > alpha:
-        print("Os resíduos seguem uma distribuição normal (p-value:", ks_p_value, ")")
+        normality_result = (f"Os residuos seguem uma distribuicao normal (p-value: {ks_p_value}")
+        print(normality_result)
     else:
-        print("Os resíduos não seguem uma distribuição normal (p-value:", ks_p_value, ")")
+        normality_result = (f"Os residuos nao seguem uma distribuicao normal (p-value: {ks_p_value}")
+        print(normality_result)
 
     # Teste ARCH para efeitos de heteroscedasticidade condicional nos resíduos
     arch_test = arch_model(residuals)
     arch_test_result = arch_test.fit()
     if arch_test_result.pvalues[-1] > 0.01:
-        print("Não há evidência de efeitos ARCH nos resíduos.")
+        arch_result = "Nao ha evidencia de efeitos ARCH nos residuos."
+        print(arch_result)
     else:
-        print("Há evidência de efeitos ARCH nos resíduos.")
+        arch_result = "Ha evidencia de efeitos ARCH nos residuos."
+        print(arch_result)
+
+    return autocorrelation_result, normality_result, arch_result
 
 
 ###------------------------------------------------------------###

@@ -160,7 +160,6 @@ mape_values = [metrics_dict[model]['MAPE'] for model in metrics_dict]
 # Chamando a função com o dicionário de métricas
 plot_metrics_comparison(metrics_dict)
 
-
 # Chamando a função com os dados de teste e previsões do modelo ETS
 analyze_ets_residuals(test_data, ets_predictions)
 

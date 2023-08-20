@@ -33,6 +33,7 @@ from scipy.stats import ks_2samp
 from arch import arch_model
 from itertools import product
 from scipy.stats import kstest
+import ast
 
 ##path com o banco de dados em CSV com o formato extraido a partir do projeto da API-CAMMESA
 path2 = r'DB'
@@ -141,46 +142,74 @@ test_stationarity_dickey_fuller(box_cox_train_data,"serie BOX-COX")
 # print(autoarima_model_ndiff.summary())
 
 # Descobrir os melhores parametros do SARIMA:
-# best_params = find_best_sarima_params(train_data, test_data)
-# print("Melhores parâmetros:", best_params)
+nome_arima_df= "resultados_arima.csv"
+if os.path.exists(nome_arima_df):
+    print("Encontramos o arquivo CSV com os dados 'resultados_arima.csv'")
+    best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
+else:
+    print("Não encontramos o arquivo CSV, então vamos rodar a função 'find_best_sarima_params'")
+    best_params_df = find_best_sarima_params(train_data, test_data, nome_arima_df, s=12, top_n=20)  # Define o número de melhores parâmetros a serem considerados
+    best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
 
-# --- Definir os parâmetros do modelo SARIMA
-p = 2  # Ordem do termo autorregressivo
-d = 0  # Ordem de diferenciação
-q = 1  # Ordem do termo de média móvel
-ps = 1  # Ordem do termo autorregressivo
-ds = 0  # Ordem de diferenciação
-qs = 1  # Ordem do termo de média móvel
-s = 12  # Periodicidade sazonal (12 para sazonalidade anual)
-max_iter = 1000
-# Criar o modelo SARIMA para a série de treino original (train_data)
-sarima_model_treino = SARIMAX(train_data['energia(mwmed)'], order=(p, d, q), seasonal_order=(ps, ds, qs, s))
-sarima_result_treino = sarima_model_treino.fit(max_iter=max_iter)
-# Valores previstos:
-predictions_test = sarima_result_treino.get_forecast(steps=len(test_data))
-predicted_values = predictions_test.predicted_mean
-test_values = test_data['energia(mwmed)']
-#residuos:
-residuals = test_values - predicted_values
+# # Extrair os melhores parâmetros da primeira linha do dataframe (os 'x' melhor)
+# best_params_str = best_params_df.iloc[0]['Parametros']
+# best_params = ast.literal_eval(best_params_str)  # Convertendo a string de tupla para uma tupla
 
-#metricas
-mse = mean_squared_error(test_values, predicted_values)
-mae = mean_absolute_error(test_values, predicted_values)
-mape = mean_absolute_percentage_error(test_values, predicted_values)
-print("Erro Quadrático Médio:", mse, "Erro Absoluto Médio:", mae, "MAPE", mape )
+# Limitar o número de iterações
+num_iterations = 10
 
-# Chamar a função para plotar a análise dos resíduos
-plot_residual_analysis(test_values, predicted_values, residuals)
+# Criar um dataframe vazio para armazenar os resultados
+results_df = pd.DataFrame(columns=['iteracao', 'parametros', 'mse', 'mae', 'mape', 'predicted_values_str', 'autocorrelacao_erros', 'normalidade_erro', 'arch_erro'])
 
-# Sumário dos resultados dos modelos
-# print("Resultado do modelo SARIMA para a série de treino original:")
-# print(sarima_result_treino.summary())
-# # Criar o modelo SARIMA para a série após o procedimento de diferenciação ndiff (first_diff_train_data)
-# sarima_model_ndiff = SARIMAX(first_diff_train_data['energia(mwmed)'], order=(p, d, q), seasonal_order=(p, d, q, s))
-# sarima_result_ndiff = sarima_model_ndiff.fit()
-# # Sumário dos resultados dos modelos
-# print("\nResultado do modelo SARIMA para a série após diferenciação ndiff:")
-# print(sarima_result_ndiff.summary())
+# Iterar sobre os 'x' melhores parâmetros do DataFrame
+i=1
+for idx, row in best_params_df.head(num_iterations).iterrows():
+    print(f"------------ ITERACAO DE NUMERO {i} ------------------")
+    best_params_str = row['Parametros']
+    best_params = ast.literal_eval(best_params_str)  # Convertendo a string de tupla para uma tupla
+    params = ast.literal_eval(row['Parametros'])
 
-# Chamar a função para testar os resíduos
-test_residuals(residuals)
+    # Desempacotar os melhores parâmetros e definir os parametros para ficar o modelo
+    p, d, q, ps, ds, qs = best_params
+    # Linha para definir manualmente os parâmetros (comente se não for usar)
+    # p, d, q, ps, ds, qs = 2, 0, 1, 1, 0, 1
+    s = 12  # Periodicidade sazonal (12 para sazonalidade anual)
+    max_iter = 1000
+    # Linha para definir manualmente os parâmetros (comente se não for usar)
+    # p, d, q, ps, ds, qs = 2, 0, 1, 1, 0, 1
+
+    # Criar o modelo SARIMA para a série de treino original (train_data)
+    sarima_model_treino = SARIMAX(train_data['energia(mwmed)'], order=(p, d, q), seasonal_order=(ps, ds, qs, s))
+    sarima_result_treino = sarima_model_treino.fit(max_iter=max_iter)
+
+    # Valores previstos:
+    predictions_test = sarima_result_treino.get_forecast(steps=len(test_data))
+    predicted_values = predictions_test.predicted_mean
+    test_values = test_data['energia(mwmed)']
+    # Converter a lista de predicted_values em uma string para salvar no dataframe
+    predicted_values_str = "\n".join(predicted_values.apply(str))
+    #calcular os residuos:
+    residuals = test_values - predicted_values
+
+    #calcular as metricas
+    mse = mean_squared_error(test_values, predicted_values)
+    mae = mean_absolute_error(test_values, predicted_values)
+    mape = mean_absolute_percentage_error(test_values, predicted_values)
+    print("Comecar as mensuracoes dos:Erro Quadrático Médio:", mse, "Erro Absoluto Médio:", mae, "MAPE", mape )
+
+    # Chamar a função para testar os resíduos
+    print('vamos rodar a funcao test_residuals')
+    test_residuals(residuals)
+    #colocar a resposta dos residuos em variaveis para salvar no dataframe
+    test_results = test_residuals(residuals)
+    autocorrelation_result, normality_result, arch_result = test_residuals(residuals)
+
+    # Chamar a função para plotar a análise dos resíduos
+    print('vamos rodar a funcao plot_residual_analysis')
+    # plot_residual_analysis(test_values, predicted_values, residuals)
+
+    results_df.loc[idx] = [idx, params, mse, mae, mape, predicted_values_str, autocorrelation_result, normality_result, arch_result]
+    results_df.to_csv('resultados_arima_completo.csv', index=False, sep=';', decimal='.')
+
+    i=i+1
+
