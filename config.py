@@ -154,3 +154,63 @@ def find_best_sarima_params(train_data, validation_data, s=12):
 
 def mean_absolute_percentage_error(y_true, y_pred):
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+
+
+def plot_residual_analysis(test_values, predicted_values, residuals):
+    plt.figure(figsize=(12, 10))
+
+    # Plotar os dados reais de teste
+    plt.subplot(3, 1, 1)
+    plt.plot(test_values.index, test_values, label='Dados de Teste', color='blue')
+    plt.plot(predicted_values.index, predicted_values, label='Previsões do Modelo', color='red')
+    plt.xlabel('Data')
+    plt.ylabel('Energia (mwmed)')
+    plt.title('Comparação entre Dados de Teste e Previsões do Modelo SARIMA')
+    plt.legend()
+
+    # Plotar a diferença entre os dados reais e as previsões (resíduos)
+    plt.subplot(3, 1, 2)
+    plt.plot(residuals.index, residuals, label='Diferença (Resíduos)', color='green')
+    plt.axhline(y=0, color='red', linestyle='--')
+    plt.xlabel('Data')
+    plt.ylabel('Energia (mwmed)')
+    plt.title('Resíduos do Modelo SARIMA')
+    plt.legend()
+
+    # Histograma dos resíduos
+    plt.subplot(3, 1, 3)
+    plt.hist(residuals, bins=20, color='blue', alpha=0.7)
+    plt.title("Histograma dos Resíduos")
+    plt.xlabel("Valor dos Resíduos")
+    plt.ylabel("Frequência")
+
+    # Ajustar o layout para evitar sobreposição
+    plt.tight_layout()
+    plt.show()
+
+def test_residuals(residuals):
+    # Teste de Ljung-Box para autocorrelação serial nos resíduos
+    lb_test = acorr_ljungbox(residuals, lags=6)
+    p_values_ljung_box = lb_test['lb_pvalue']
+    min_p_value_idx = lb_test['lb_pvalue'].idxmin()
+    min_p_value = lb_test['lb_pvalue'].min()
+    if all(p > 0.01 for p in p_values_ljung_box):
+        print("Não há evidência de autocorrelação serial nos resíduos. LAG",min_p_value_idx,'valor',min_p_value)
+    else:
+        print("Há evidência de autocorrelação serial nos resíduos. LAG",min_p_value_idx,'valor',min_p_value)
+
+    # Teste de Kolmogorov-Smirnov para normalidade dos resíduos
+    ks_statistic, ks_p_value = kstest(residuals, 'norm')
+    alpha = 0.05  # Nível de significância
+    if ks_p_value > alpha:
+        print("Os resíduos seguem uma distribuição normal (p-value:", ks_p_value, ")")
+    else:
+        print("Os resíduos não seguem uma distribuição normal (p-value:", ks_p_value, ")")
+
+    # Teste ARCH para efeitos de heteroscedasticidade condicional nos resíduos
+    arch_test = arch_model(residuals)
+    arch_test_result = arch_test.fit()
+    if arch_test_result.pvalues[-1] > 0.01:
+        print("Não há evidência de efeitos ARCH nos resíduos.")
+    else:
+        print("Há evidência de efeitos ARCH nos resíduos.")
