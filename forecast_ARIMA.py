@@ -8,32 +8,13 @@ from config import test_residuals
 #outras LIBS
 import os.path
 import pandas as pd
-import numpy as np
-from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing
 from sklearn.metrics import mean_squared_error
-import matplotlib.pyplot as plt
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
-from statsmodels.graphics.tsaplots import plot_acf
-from statsmodels.stats.diagnostic import acorr_ljungbox
-from statsmodels.tools.eval_measures import rmse
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
-from statsmodels.tsa.seasonal import seasonal_decompose
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from statsmodels.tsa.stattools import adfuller
 from scipy.stats import boxcox
-from statsmodels.tsa.arima_model import ARIMA
-from pmdarima import auto_arima
-import seaborn as sns
-from statsmodels.stats.diagnostic import acorr_ljungbox
-from scipy.stats import ks_2samp
-from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.stats.diagnostic import acorr_ljungbox
-from scipy.stats import ks_2samp
-from arch import arch_model
-from itertools import product
-from scipy.stats import kstest
 import ast
+from pmdarima import auto_arima
+
 
 ##path com o banco de dados em CSV com o formato extraido a partir do projeto da API-CAMMESA
 path2 = r'DB'
@@ -70,6 +51,9 @@ df_oferta_data_ts = df_oferta_data_ts.asfreq('MS')
 train_end_date = '2022-12-01'
 train_data = df_oferta_data_ts.loc['2016-01-01':'2022-06-01']
 test_data = df_oferta_data_ts.loc['2022-07-01':'2023-06-30']
+
+#sazonalidade
+seasonal_period = 12
 
 # ------------------- start dos procedimentos de ARIMA - metodologia BOX-JENKINS ------------------- #
 #Modelos ARIMA
@@ -111,7 +95,7 @@ plot_dado_mes_histograma(df_oferta_data_ts, "analise inicial serie temporal")
 
 #separar componentes dos dados, rodando para casos aditivos(sazo constante ao longo da serie):
 plot_serie_decomposition(df_oferta_data_ts, model='additive', period=12)
-# plot_serie_decomposition(df_oferta_data, model='multiplicative', period=12)
+plot_serie_decomposition(df_oferta_data_ts, model='multiplicative', period=12)
 
 #fazer a testagem de autocorrelacao da serie ACF e PACF:
 plot_acf_pacf(train_data, lags=17)
@@ -120,96 +104,124 @@ plot_acf_pacf(train_data, lags=17)
 test_stationarity_dickey_fuller(train_data,"serie treino")
 
 # Aplicar os metodos "I" ndiff de diferenciacao para remover a estacionaridade das series(m-1 e m-11):
-seasonal_period = 12 #periodo sazonal
-first_diff_train_data = train_data.diff(periods=1).dropna() #serie ndiff
-seasonal_diff_train_data = train_data.diff(periods=seasonal_period).dropna() #serie ndiff sazo
-test_stationarity_dickey_fuller(first_diff_train_data,"serie diferenciacao m-1")
-test_stationarity_dickey_fuller(seasonal_diff_train_data,"serie diferenciacao m-12")
-#aplicar o metodo BOX-COX para tentar deixar estacionaria
-box_cox_train_data, lambda_value = boxcox(train_data['energia(mwmed)']) #serie BOX-COX
-test_stationarity_dickey_fuller(box_cox_train_data,"serie BOX-COX")
+diff_period1 = 1
+diff_period2 = 2
+diff_period3 = 12
+#aplicando os testes para os periodos acima
+first_diff_train_data = train_data.diff(periods=diff_period1).dropna() #serie ndiff1
+# second_diff_train_data = train_data.diff(periods=diff_period2).dropna() #serie ndiff ndiff2
+# seasonal_diff_train_data = train_data.diff(periods=diff_period3).dropna() #serie ndiff sazo
+# Teste para estacionariedade
+test_stationarity_dickey_fuller(first_diff_train_data,f"serie diferenciacao m-1")
+# test_stationarity_dickey_fuller(second_diff_train_data,f"serie diferenciacao m-12")
+# test_stationarity_dickey_fuller(seasonal_diff_train_data,f"serie diferenciacao m-12")
 
-# --- agora com todos os testes aplicar o auto-arima na base de treino
-# print("----autoarima_model_treino")
-# autoarima_model_treino = auto_arima(train_data['energia(mwmed)'], seasonal=True, m=12,stepwise=True,suppress_warnings=False, trace=False)
-# autoarima_model_treino.fit(train_data['energia(mwmed)'])
-# print(autoarima_model_treino.summary())
 
-#agora com todos os testes aplicar o auto-arima na base de ndiff
-# print("----autoarima_model_ndiff")
-# autoarima_model_ndiff = auto_arima(first_diff_train_data['energia(mwmed)'], seasonal=True, m=12,stepwise=True,suppress_warnings=False, trace=False)
-# autoarima_model_ndiff.fit(first_diff_train_data['energia(mwmed)'])
-# print(autoarima_model_ndiff.summary())
 
-# Descobrir os melhores parametros do SARIMA:
-nome_arima_df= "resultados_arima.csv"
-if os.path.exists(nome_arima_df):
-    print("Encontramos o arquivo CSV com os dados 'resultados_arima.csv'")
-    best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
-else:
-    print("Não encontramos o arquivo CSV, então vamos rodar a função 'find_best_sarima_params'")
-    best_params_df = find_best_sarima_params(train_data, test_data, nome_arima_df, s=12, top_n=20)  # Define o número de melhores parâmetros a serem considerados
-    best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
+# #aplicar o metodo BOX-COX para tentar deixar estacionaria
+# box_cox_train_data, lambda_value = boxcox(train_data['energia(mwmed)']) #serie BOX-COX
+# test_stationarity_dickey_fuller(box_cox_train_data,"serie BOX-COX")
 
-# # Extrair os melhores parâmetros da primeira linha do dataframe (os 'x' melhor)
-# best_params_str = best_params_df.iloc[0]['Parametros']
-# best_params = ast.literal_eval(best_params_str)  # Convertendo a string de tupla para uma tupla
 
-# Limitar o número de iterações
-num_iterations = 10
+def func_auto_arima(train_data, test_data,seasonal_period):
 
-# Criar um dataframe vazio para armazenar os resultados
-results_df = pd.DataFrame(columns=['iteracao', 'parametros', 'mse', 'mae', 'mape', 'predicted_values_str', 'autocorrelacao_erros', 'normalidade_erro', 'arch_erro'])
+    #rodar o autoarima:
+    autoarima_model_treino = auto_arima(train_data['energia(mwmed)'], seasonal=True, m=seasonal_period, stepwise=True,suppress_warnings=False, trace=False)
+    autoarima_result_treino = autoarima_model_treino.fit(train_data['energia(mwmed)'])
+    print(autoarima_model_treino.summary())
+    # Valores previstos de diferenças sazonais
+    predicted_values = autoarima_result_treino.predict(n_periods=len(test_data))
 
-# Iterar sobre os 'x' melhores parâmetros do DataFrame
-i=1
-for idx, row in best_params_df.head(num_iterations).iterrows():
-    print(f"------------ ITERACAO DE NUMERO {i} ------------------")
-    best_params_str = row['Parametros']
-    best_params = ast.literal_eval(best_params_str)  # Convertendo a string de tupla para uma tupla
-    params = ast.literal_eval(row['Parametros'])
-
-    # Desempacotar os melhores parâmetros e definir os parametros para ficar o modelo
-    p, d, q, ps, ds, qs = best_params
-    # Linha para definir manualmente os parâmetros (comente se não for usar)
-    # p, d, q, ps, ds, qs = 2, 0, 1, 1, 0, 1
-    s = 12  # Periodicidade sazonal (12 para sazonalidade anual)
-    max_iter = 1000
-    # Linha para definir manualmente os parâmetros (comente se não for usar)
-    # p, d, q, ps, ds, qs = 2, 0, 1, 1, 0, 1
-
-    # Criar o modelo SARIMA para a série de treino original (train_data)
-    sarima_model_treino = SARIMAX(train_data['energia(mwmed)'], order=(p, d, q), seasonal_order=(ps, ds, qs, s))
-    sarima_result_treino = sarima_model_treino.fit(max_iter=max_iter)
-
-    # Valores previstos:
-    predictions_test = sarima_result_treino.get_forecast(steps=len(test_data))
-    predicted_values = predictions_test.predicted_mean
+    #continuando
     test_values = test_data['energia(mwmed)']
-    # Converter a lista de predicted_values em uma string para salvar no dataframe
-    predicted_values_str = "\n".join(predicted_values.apply(str))
-    #calcular os residuos:
+    # calcular os residuos:
     residuals = test_values - predicted_values
 
-    #calcular as metricas
+    # calcular as metricas
     mse = mean_squared_error(test_values, predicted_values)
     mae = mean_absolute_error(test_values, predicted_values)
     mape = mean_absolute_percentage_error(test_values, predicted_values)
-    print("Comecar as mensuracoes dos:Erro Quadrático Médio:", mse, "Erro Absoluto Médio:", mae, "MAPE", mape )
-
+    print("Comecar as mensuracoes dos:Erro Quadrático Médio:", mse, "Erro Absoluto Médio:", mae, "MAPE", mape)
     # Chamar a função para testar os resíduos
     print('vamos rodar a funcao test_residuals')
-    test_residuals(residuals)
-    #colocar a resposta dos residuos em variaveis para salvar no dataframe
     test_results = test_residuals(residuals)
     autocorrelation_result, normality_result, arch_result = test_residuals(residuals)
 
     # Chamar a função para plotar a análise dos resíduos
     print('vamos rodar a funcao plot_residual_analysis')
-    # plot_residual_analysis(test_values, predicted_values, residuals)
+    plot_residual_analysis(test_values, predicted_values, residuals)
+    return
 
-    results_df.loc[idx] = [idx, params, mse, mae, mape, predicted_values_str, autocorrelation_result, normality_result, arch_result]
-    results_df.to_csv('resultados_arima_completo.csv', index=False, sep=';', decimal='.')
 
-    i=i+1
+def func_peter_arima_traindata(train_data, test_data,seasonal_period,i):
+    # Descobrir os melhores parametros do SARIMA:
+    nome_arima_df= "resultados_arima.csv"
+    if os.path.exists(nome_arima_df):
+        print("Encontramos o arquivo CSV com os dados 'resultados_arima.csv'")
+        best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
+    else:
+        print("Não encontramos o arquivo CSV, então vamos rodar a função 'find_best_sarima_params'")
+        best_params_df = find_best_sarima_params(train_data, test_data, nome_arima_df, s=seasonal_period, top_n=20)  # Define o número de melhores parâmetros a serem considerados
+        best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
 
+    # Limitar o número de iterações
+    num_iterations = 1
+
+    # Criar um dataframe vazio para armazenar os resultados
+    results_df = pd.DataFrame(columns=['iteracao', 'parametros', 'mse', 'mae', 'mape', 'predicted_values_str', 'autocorrelacao_erros', 'normalidade_erro', 'arch_erro'])
+
+    # Iterar sobre os 'x' melhores parâmetros do DataFrame
+    # i=1
+    for idx, row in best_params_df.head(num_iterations).iterrows():
+        print(f"------------ ITERACAO DE NUMERO {i} ------------------")
+        best_params_str = row['Parametros']
+        best_params = ast.literal_eval(best_params_str)  # Convertendo a string de tupla para uma tupla
+        params = ast.literal_eval(row['Parametros'])
+
+        # Desempacotar os melhores parâmetros e definir os parametros para ficar o modelo
+        p, d, q, ps, ds, qs = best_params
+        # Linha para definir manualmente os parâmetros (comente se não for usar)
+        # p, d, q, ps, ds, qs = 2, 0, 1, 1, 0, 1
+        s = 12  # Periodicidade sazonal (12 para sazonalidade anual)
+        max_iter = 500
+
+        # Criar o modelo SARIMA para a série de treino original (train_data)
+        sarima_model_treino = SARIMAX(train_data['energia(mwmed)'], order=(p, d, q), seasonal_order=(ps, ds, qs, s))
+        sarima_result_treino = sarima_model_treino.fit(max_iter=max_iter)
+
+        # Valores previstos:
+        predictions_test = sarima_result_treino.get_forecast(steps=len(test_data))
+        predicted_values = predictions_test.predicted_mean
+        test_values = test_data['energia(mwmed)']
+        # Converter a lista de predicted_values em uma string para salvar no dataframe
+        predicted_values_str = "\n".join(predicted_values.apply(str))
+        #calcular os residuos:
+        residuals = test_values - predicted_values
+
+        #calcular as metricas
+        mse = mean_squared_error(test_values, predicted_values)
+        mae = mean_absolute_error(test_values, predicted_values)
+        mape = mean_absolute_percentage_error(test_values, predicted_values)
+        print("Comecar as mensuracoes dos:Erro Quadrático Médio:", mse, "Erro Absoluto Médio:", mae, "MAPE", mape )
+
+        # Chamar a função para testar os resíduos
+        print('vamos rodar a funcao test_residuals')
+        test_residuals(residuals)
+        #colocar a resposta dos residuos em variaveis para salvar no dataframe
+        test_results = test_residuals(residuals)
+        autocorrelation_result, normality_result, arch_result = test_residuals(residuals)
+
+        # Chamar a função para plotar a análise dos resíduos
+        print('vamos rodar a funcao plot_residual_analysis')
+        plot_residual_analysis(test_values, predicted_values, residuals)
+
+        results_df.loc[idx] = [idx, params, mse, mae, mape, predicted_values_str, autocorrelation_result, normality_result, arch_result]
+        results_df.to_csv('resultados_arima_completo.csv', index=False, sep=';', decimal='.')
+        i=i+1
+    return
+
+#rodar funcao com a serie normal sem tratamentos:
+func_auto_arima(train_data, test_data,seasonal_period)
+
+#rodar funcao com a serie normal sem tratamentos:
+# func_peter_arima_traindata(train_data, test_data,seasonal_period, i=1)

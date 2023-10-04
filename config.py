@@ -4,17 +4,17 @@ import os.path
 import pandas as pd
 import numpy as np
 from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 import matplotlib.pyplot as plt
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tools.eval_measures import rmse
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.stattools import adfuller
 from scipy.stats import boxcox
+from scipy.stats import shapiro
 from statsmodels.tsa.arima_model import ARIMA
 from pmdarima import auto_arima
 import seaborn as sns
@@ -28,6 +28,9 @@ from arch import arch_model
 from itertools import product
 from scipy.stats import kstest
 path = os.path.abspath(os.path.dirname(__file__))
+import ast
+from scipy import stats
+from scipy.stats import norm
 
 
 ###------------------------------------------------------------###
@@ -46,37 +49,46 @@ def plot_exponential_forecasts(train_data, test_data, predictions_dict, title):
     plt.legend()
     plt.show()
 
-def plot_dado_mes_histograma(data, title):
+def plot_dado_mes_histograma(data, title, xlabel=None):
+    if xlabel is None:
+        xlabel = data.columns[0]  # Use a primeira coluna se o xlabel não for especificado
     fig = plt.figure(figsize=(12, 8))
     # Primeiro e segundo quadrantes - Série temporal completa
     ax1 = fig.add_subplot(2, 2, (1, 2))
-    ax1.plot(data.index, data['energia(mwmed)'])
-    ax1.set_title('Série Temporal Completa')
+    ax1.plot(data.index, data[xlabel])
+    ax1.set_title(title)
     ax1.set_xlabel('Data')
-    ax1.set_ylabel('Energia (mwmed)')
+    ax1.set_ylabel(xlabel)
     # Terceiro quadrante - Gráfico por mês e ano
     ax2 = fig.add_subplot(2, 2, 3)
     grouped_monthly = data.groupby([data.index.month, data.index.year]).sum()
-    grouped_monthly['energia(mwmed)'].unstack().plot(ax=ax2, marker='o')
+    grouped_monthly[xlabel].unstack().plot(ax=ax2, marker='o')
     ax2.set_title('Energia por Mês e Ano')
     ax2.set_xlabel('Mês')
-    ax2.set_ylabel('Energia (mwmed)')
+    ax2.set_ylabel(xlabel)
     ax2.set_xticks(range(1, 13))
     ax2.set_xticklabels(['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'])
-    # Quarto quadrante - Histograma
+    # Quarto quadrante - Histograma com curvas de adequação e normal
     ax3 = fig.add_subplot(2, 2, 4)
-    ax3.hist(data['energia(mwmed)'], bins=20)
-    ax3.set_title('Histograma')
-    ax3.set_xlabel('Energia (mwmed)')
+    h = data[xlabel]
+    # Plotar curva de adequação e histograma dos dados
+    sns.histplot(h, bins=20, kde=True, ax=ax3, color='blue', label='Distribuição dos Dados')
+    ax3.set_title('Histograma com Curvas de Adequação')
+    ax3.set_xlabel(xlabel)
     ax3.set_ylabel('Frequência')
+    ax3.legend()
+
     # Ajustar layout para evitar sobreposição
     plt.tight_layout()
     # Exibir os gráficos
     plt.show()
 
-def plot_serie_decomposition(data, model, period=12):
+
+def plot_serie_decomposition(data, model, period=12, title=None):
     fig, axes = plt.subplots(4, 1, figsize=(10, 10))
     decomposition = seasonal_decompose(data, model=model, period=period)
+    if title is not None:
+        fig.suptitle(title, y=1.001)  # Ajuste o valor de y para controlar a distância entre os títulos
     # Plotar a componente observada
     axes[0].plot(data.index, decomposition.observed)
     axes[0].set_ylabel('Observado')
@@ -96,6 +108,20 @@ def plot_serie_decomposition(data, model, period=12):
     # Ajustar o layout para evitar sobreposição
     plt.tight_layout()
     plt.show()
+
+def test_normality(data, alpha=0.05):
+    column_data = data.iloc[:, 0]
+    column_name = data.columns[0]
+    resultado_teste, p_valor = kstest((column_data - column_data.mean()) / column_data.std(), 'norm')
+
+    if p_valor < alpha:
+        mensagem = "A série de dados não segue uma distribuição normal."
+    else:
+        mensagem = "A série de dados parece seguir uma distribuição normal."
+
+    print(f"Resultado do Teste de Normalidade de Kolmogorov-Smirnov para {column_name}: {mensagem}")
+    print(f"P-valor para {column_name}: {p_valor}")
+    print(f"Resultado do Teste para {column_name}: {resultado_teste}")
 
 def plot_acf_pacf(data, lags=20):
     fig, axes = plt.subplots(2, 1, figsize=(10, 8))
@@ -120,7 +146,6 @@ def test_stationarity_dickey_fuller(data,serie):
         print(f'A série {serie} é estacionária. ')
     else:
         print(f'A série {serie} não é estacionária. ')
-
 
 def find_best_sarima_params(train_data, validation_data, nome_arima_df, s=12, top_n=5):
     # Definir a grade de parametrizações
@@ -200,14 +225,14 @@ def test_residuals(residuals):
         autocorrelation_result = (f"Ha evidencia de autocorrelacao serial nos residuos. LAG, {min_p_value_idx},'valor',{min_p_value}")
         print(autocorrelation_result)
 
-    # Teste de Kolmogorov-Smirnov para normalidade dos resíduos
-    ks_statistic, ks_p_value = kstest(residuals, 'norm')
+    # Teste de Shapiro-Wilk para normalidade dos resíduos
+    shapiro_stat, shapiro_p_value = shapiro(residuals)
     alpha = 0.05  # Nível de significância
-    if ks_p_value > alpha:
-        normality_result = (f"Os residuos seguem uma distribuicao normal (p-value: {ks_p_value}")
+    if shapiro_p_value > alpha:
+        normality_result = (f"Os residuos seguem uma distribuicao normal (p-value: {shapiro_p_value})")
         print(normality_result)
     else:
-        normality_result = (f"Os residuos nao seguem uma distribuicao normal (p-value: {ks_p_value}")
+        normality_result = (f"Os residuos nao seguem uma distribuicao normal (p-value: {shapiro_p_value})")
         print(normality_result)
 
     # Teste ARCH para efeitos de heteroscedasticidade condicional nos resíduos
@@ -222,7 +247,76 @@ def test_residuals(residuals):
 
     return autocorrelation_result, normality_result, arch_result
 
+def func_peter_arima_traindata(train_data, test_data,i,seasonal_period,diferenca):
+    # Descobrir os melhores parametros do SARIMA:
+    nome_arima_df= "resultados_arima.csv"
+    if os.path.exists(nome_arima_df):
+        print("Encontramos o arquivo CSV com os dados 'resultados_arima.csv'")
+        best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
+    else:
+        print("Não encontramos o arquivo CSV, então vamos rodar a função 'find_best_sarima_params'")
+        best_params_df = find_best_sarima_params(train_data, test_data, nome_arima_df, s=seasonal_period, top_n=20)  # Define o número de melhores parâmetros a serem considerados
+        best_params_df = pd.read_csv(nome_arima_df, sep=';', decimal='.')
 
+    # Limitar o número de iterações
+    num_iterations = 1
+
+    # Criar um dataframe vazio para armazenar os resultados
+    results_df = pd.DataFrame(columns=['iteracao', 'parametros', 'mse', 'mae', 'mape', 'predicted_values_str', 'autocorrelacao_erros', 'normalidade_erro', 'arch_erro'])
+
+    # Iterar sobre os 'x' melhores parâmetros do DataFrame
+    # i=1
+    for idx, row in best_params_df.head(num_iterations).iterrows():
+        print(f"------------ ITERACAO DE NUMERO {i} ------------------")
+        best_params_str = row['Parametros']
+        best_params = ast.literal_eval(best_params_str)  # Convertendo a string de tupla para uma tupla
+        params = ast.literal_eval(row['Parametros'])
+
+        # Desempacotar os melhores parâmetros e definir os parametros para ficar o modelo
+        p, d, q, ps, ds, qs = best_params
+        # Linha para definir manualmente os parâmetros (comente se não for usar)
+        # p, d, q, ps, ds, qs = 2, 0, 1, 1, 0, 1
+        s = 12  # Periodicidade sazonal (12 para sazonalidade anual)
+        max_iter = 500
+        # Linha para definir manualmente os parâmetros (comente se não for usar)
+        # p, d, q, ps, ds, qs = 2, 0, 1, 1, 0, 1
+
+        # Criar o modelo SARIMA para a série de treino original (train_data)
+        sarima_model_treino = SARIMAX(train_data['energia(mwmed)'], order=(p, d, q), seasonal_order=(ps, ds, qs, s))
+        sarima_result_treino = sarima_model_treino.fit(max_iter=max_iter)
+
+        # Valores previstos:
+        predictions_test = sarima_result_treino.get_forecast(steps=len(test_data))
+        predicted_values = predictions_test.predicted_mean
+        test_values = test_data['energia(mwmed)']
+        # Converter a lista de predicted_values em uma string para salvar no dataframe
+        predicted_values_str = "\n".join(predicted_values.apply(str))
+        #calcular os residuos:
+        residuals = test_values - predicted_values
+
+        #calcular as metricas
+        mse = mean_squared_error(test_values, predicted_values)
+        mae = mean_absolute_error(test_values, predicted_values)
+        mape = mean_absolute_percentage_error(test_values, predicted_values)
+        print("Comecar as mensuracoes dos:Erro Quadrático Médio:", mse, "Erro Absoluto Médio:", mae, "MAPE", mape )
+
+        # Chamar a função para testar os resíduos
+        print('vamos rodar a funcao test_residuals')
+        test_residuals(residuals)
+        #colocar a resposta dos residuos em variaveis para salvar no dataframe
+        test_results = test_residuals(residuals)
+        autocorrelation_result, normality_result, arch_result = test_residuals(residuals)
+
+        # Chamar a função para plotar a análise dos resíduos
+        print('vamos rodar a funcao plot_residual_analysis')
+        plot_residual_analysis(test_values, predicted_values, residuals)
+
+        results_df.loc[idx] = [idx, params, mse, mae, mape, predicted_values_str, autocorrelation_result, normality_result, arch_result]
+        results_df.to_csv('resultados_arima_completo.csv', index=False, sep=';', decimal='.')
+
+        i=i+1
+
+    return
 ###------------------------------------------------------------###
 #------------- FUNCOES PARA O CODIGO forecast_ETS----------------#
 ###------------------------------------------------------------###
@@ -269,7 +363,6 @@ def plot_four_quadrants(data, title):
 def mean_absolute_percentage_error(y_true, y_pred):
     return np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
-
 def plot_ets_decomposition(ets_fit):
     fig, axes = plt.subplots(4, 1, figsize=(10, 10))
     decomposition = seasonal_decompose(ets_fit.fittedvalues, model='additive', period=12)
@@ -292,7 +385,6 @@ def plot_ets_decomposition(ets_fit):
     # Ajustar o layout para evitar sobreposição
     plt.tight_layout()
     plt.show()
-
 
 def plot_metrics_comparison(metrics_dict):
     models = list(metrics_dict.keys())
@@ -349,4 +441,41 @@ def analyze_ets_residuals(test_data, ets_predictions):
     # Realizar o teste de Ljung-Box para verificar a autocorrelação dos resíduos
     lb_test_ets = acorr_ljungbox(residuals_ets, lags=5)
     print("lb_test_ets:", lb_test_ets)
+
+
+###------------------------------------------------------------###
+#------------FUNCOES PARA O CODIGO forecast_CORREL---------------#
+###------------------------------------------------------------###
+
+def teste_shapiro(residuos, alpha=0.05, metodo=""):
+    stat, p_valor = shapiro(residuos)
+    # print(f'Estatística do teste: {stat}')
+    # print(f'Valor-p: {p_valor}')
+
+    if p_valor > alpha:
+        print(f"Valor-p: {p_valor}. Os resíduos {metodo} parecem seguir uma distribuição normal (não rejeita H0)")
+    else:
+        print(f"Valor-p: {p_valor}. Os resíduos {metodo} não seguem uma distribuição normal (rejeita H0)")
+
+def plotar_distribuicao_residuos(residuos_ols, residuos_qd):
+    # Configuração do estilo do gráfico
+    sns.set_style("whitegrid")
+    # Cria uma figura com dois subplots
+    plt.figure(figsize=(10, 6))
+    # Primeiro subplot (parte de cima): OLS Linear
+    plt.subplot(2, 1, 1)
+    sns.histplot(residuos_ols, kde=True, color="b")
+    plt.title("Distribuição de Resíduos (OLS Linear)")
+    plt.xlabel("Resíduos")
+    plt.ylabel("Densidade")
+    # Segundo subplot (parte de baixo): OLS Quadrático
+    plt.subplot(2, 1, 2)
+    sns.histplot(residuos_qd, kde=True, color="m")
+    plt.title("Distribuição de Resíduos (OLS Quadrático)")
+    plt.xlabel("Resíduos")
+    plt.ylabel("Densidade")
+    # Ajusta o layout
+    plt.tight_layout()
+    # Mostra o gráfico
+    plt.show()
 

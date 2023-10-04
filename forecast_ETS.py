@@ -3,7 +3,7 @@ import os.path
 import pandas as pd
 from config import path, mean_absolute_percentage_error
 from config import plot_exponential_forecasts, plot_four_quadrants, plot_ets_decomposition, plot_metrics_comparison
-from config import analyze_ets_residuals
+from config import analyze_ets_residuals, test_residuals
 import numpy as np
 from statsmodels.tsa.holtwinters import SimpleExpSmoothing, ExponentialSmoothing
 from sklearn.metrics import mean_squared_error
@@ -14,7 +14,6 @@ from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tools.eval_measures import rmse
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 from statsmodels.tsa.seasonal import seasonal_decompose
-
 
 ##path com o banco de dados em CSV com o formato extraido a partir do projeto da API-CAMMESA
 # path2 = r'BD_historico'
@@ -131,7 +130,7 @@ metrics_dict['HW - Multiplicativo'] = metrics_hw_multiplicativo
 
 #---4---aplicar o 4 modelos ETS (Error, Trend, Seasonal):
 # 1) Treinar o modelo ETS nos dados de treinamento
-ets_model = ExponentialSmoothing(train_data['energia(mwmed)'], trend='add', seasonal='add', seasonal_periods=12)
+ets_model = ExponentialSmoothing(train_data['energia(mwmed)'], trend='add', seasonal='mul', seasonal_periods=12)
 ets_fit = ets_model.fit()
 print("Parâmetros do modelo ETS:", ets_fit.params)
 # 2) Fazer previsões nos dados de teste
@@ -144,10 +143,10 @@ metrics_ets = {
 }
 metrics_dict['ETS'] = metrics_ets
 # 4) plotar os gráficos (usar funcao)
-plot_exponential_forecasts(train_data, test_data, {'SES': ses_predictions, 'SEH': seh_predictions, 'HW - Multiplicativo': hw_multiplicativo_predictions, 'ETS': ets_predictions}, 'Previsões de Energia usando Métodos Exponenciais')
+# plot_exponential_forecasts(train_data, test_data, {'SES': ses_predictions, 'SEH': seh_predictions, 'HW - Aditivo': hw_aditivo_predictions,'HW - Multiplicativo': hw_multiplicativo_predictions, 'ETS': ets_predictions}, 'Previsões de Energia usando Métodos Exponenciais')
 
 # Chamando a função com o objeto 'ets_fit'
-plot_ets_decomposition(ets_fit)
+# plot_ets_decomposition(ets_fit)
 
 # Criar o DataFrame a partir do dicionário de métricas e plotar grafico:
 metrics_df = pd.DataFrame(metrics_dict)
@@ -158,10 +157,13 @@ mae_values = [metrics_dict[model]['MAE'] for model in metrics_dict]
 mape_values = [metrics_dict[model]['MAPE'] for model in metrics_dict]
 
 # Chamando a função com o dicionário de métricas
-plot_metrics_comparison(metrics_dict)
+# plot_metrics_comparison(metrics_dict)
 
 # Chamando a função com os dados de teste e previsões do modelo ETS
-analyze_ets_residuals(test_data, ets_predictions)
+# analyze_ets_residuals(test_data, ets_predictions)
+residuals = test_data['energia(mwmed)'] - ets_predictions
+
+test_residuals(residuals)
 
 ##problema de convergencia !!!!
 ##modelo ETS: A inclusão do parâmetro 'damping_trend'
